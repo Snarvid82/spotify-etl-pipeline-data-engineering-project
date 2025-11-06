@@ -377,7 +377,10 @@ The crawlers created data catalogs and provided tables for each category (song, 
 ![Tables created by the crawlers.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Tables%20created%20by%20the%20crawlers.png)
 
 By using the Query Editor in Amazon Athena I could now perform SQL queries on the tables made by the crawler.
-By completing the ETL data pipeline the business could now take full advantage of the data.
+
+![SQL queries in Amazon Athena.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/SQL%20queries%20in%20Amazon%20Athena.png)
+
+## By completing the ETL data pipeline the business could now take full advantage of the data.
 
 
 
