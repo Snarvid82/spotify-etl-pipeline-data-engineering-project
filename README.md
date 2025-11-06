@@ -3,7 +3,7 @@
 ## Introduction
 This end-to-end data engineering project I have completed is part of the "Python for Data Engineering" course from DataVidhya.
 
-### The Project Case
+## The Project Case
 A business wants to get information on what kind of music is globally trending. As part of the music production industry it wants to focus on music that is being listened to by a wide audience.
 Data from Spotify will be able to provide very useful insights for the business by finding the most played songs, artists and albums every week.
 The data will be used long term for finding trends and insights.
@@ -220,6 +220,16 @@ def lambda_handler(event, context):
     )
 ```
 
+
+Data had now been stored in the S3 raw_data/to_processed folder.
+
+Status on the data pipeline so far:
+![Data pipeline architecture - Status 2.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Data%20pipeline%20architecture%20-%20Status%202.png)
+
+
+Next I will set up the transformation by creating a new Lambda function in AWS. This function will transform the raw data and put it into the "raw_data/processed" folder.
+From there it will be moved to the "transformed_data" folder in S3, and the data in "to_processed" will be automatically deleted.
+
 Code for the data transformation and load Lambda function:
 ```
 import json
@@ -329,7 +339,45 @@ def lambda_handler(event, context):
         s3_resource.Object(bucket, key).delete()
 ```
 
+Next I needed to automate the process by creating triggers for the two Lambda functions.
 
+For the Lambda function for extraction of data ("spotify_api_data_extract") I set up an EventBridge (CloudWatch Events) 
+trigger to run every 1 minute (for testing purposes).
+
+*I deleted this trigger after all the testing was complete in order to avoid any possible AWS charges.*
+
+![EventBridge trigger for data extraction.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/EventBridge%20trigger%20for%20data%20extraction.png)
+
+For the Lambda function for transformation of data (spotify_transformation_load_function) I created a S3 trigger. 
+Here I also needed to update the permissions by including the AWSLambdaRole.
+
+![S3 trigger for data transformation.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/S3%20trigger%20for%20data%20transformation.png)
+
+Further, I needed to make sure the two Lambda functions were allowed to communicate with each other.
+
+## Loading
+I have now reached the Load part of the ETL pipeline.
+
+![Data pipeline architecture - Status 3.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Data%20pipeline%20architecture%20-%20Status%203.png)
+
+First I created the crawlers which will go through all the processed data and make sense of rows, columns, data types etc. and infer schemas.
+I made one crawler for songs, one for artist and one for album.
+
+![Created 3 crawlers.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Created%203%20crawlers.png)
+
+When running the crawlers the schema for artist data was not displaying column name properly. 
+I manually edited the schema (JSON code) to correct this.
+
+![Column name not displayed properly.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Column%20name%20not%20displayed%20properly.png)
+
+![JSON code edited manually.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/JSON%20code%20edited%20manually.png)
+
+The crawlers created data catalogs and provided tables for each category (song, artist and albums).
+
+![Tables created by the crawlers.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Tables%20created%20by%20the%20crawlers.png)
+
+By using the Query Editor in Amazon Athena I could now perform SQL queries on the tables made by the crawler.
+By completing the ETL data pipeline the business could now take full advantage of the data.
 
 
 
