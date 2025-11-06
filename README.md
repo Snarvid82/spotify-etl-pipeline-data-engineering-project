@@ -161,5 +161,175 @@ Next step is using AWS to set things up in the cloud.
 
 ![Data pipeline architecture - Status 1.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Data%20pipeline%20architecture%20-%20Status%201.png)
 
+I already have an AWS account and started by creating a S3 bucket with 2 folders: "raw_data" and "transformed_data". 
+The sub-folders inside these 2 folders can be seen below:
+
+![Folders inside raw_data folder.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Folders%20inside%20raw_data%20folder.png)
+
+![Folders inside transformed_data folder.png](https://github.com/Snarvid82/spotify-etl-pipeline-data-engineering-project/blob/main/Folders%20inside%20transformed_data%20folder.png)
+
+
+I created a Lambda function in AWS, updated the necessary code and ran a test to see that the api was working as expected.
+
+I also needed to create a layer for Lambda to be able to use Spotify. This was done by creating the layer in AWS and uploading a spotify_layer.zip file. 
+Then I applied the layer to the Lambda function.
+
+Next step is to store this data in the S3 bucket. For that I will use the command `import boso3` in the lambda function code. 
+This function package was created by AWS in order to communicate properly with AWS services.
+
+I also needed to attach a permission policy giving the necessary permissions for S3 actions.
+
+Additionally I needed to adjust the "timeout" setting in the Lambda function. This was initially set to only 3 seconds and I changed it to 90 seconds.
+
+
+*I encountered some errors while running the Lambda tests. These errors were connected to small typos, some missing code and the timeout setting.
+Errors are part of the learning process and fixing errors is a great skill to have.*
+
+Code for the data extraction Lambda function:
+```
+import json
+import os
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import boto3
+from datetime import datetime
+
+def lambda_handler(event, context):
+
+    client_id = os.environ.get('client_id')
+    client_secret = os.environ.get('client_secret')
+
+
+    client_credentials_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+    sp = spotipy.Spotify(client_credentials_manager = client_credentials_manager)
+    playlists = sp.user_playlists('spotify')
+
+    playlist_link = "https://open.spotify.com/playlist/6UeSakyzhiEt4NB3UAd6NQ"
+    playlist_URI = playlist_link.split("/")[-1].split("?")[0]
+
+    spotify_data = sp.playlist_tracks(playlist_URI)
+
+    client = boto3.client('s3')
+
+    filename = "spotify_raw_" + str(datetime.now()) + ".json"
+
+    client.put_object(
+        Bucket='spotify-etl-project-arvid',
+        Key='raw_data/to_processed/' + filename,
+        Body=json.dumps(spotify_data)
+    )
+```
+
+Code for the data transformation and load Lambda function:
+```
+import json
+import boto3
+from datetime import datetime
+from io import StringIO
+import pandas as pd
+
+def album(data):
+    album_list = []
+    for row in data['items']:
+        album_id = row['track']['album']['id']
+        album_name = row['track']['album']['name']
+        album_release_date = row['track']['album']['release_date']
+        album_total_tracks = row['track']['album']['total_tracks']
+        album_url = row['track']['album']['external_urls']['spotify']
+        album_element = {'album_id':album_id,'name':album_name, 'release_date':album_release_date,'total_tracks':album_total_tracks,'url':album_url}
+        album_list.append(album_element)
+    return album_list
+
+def artist(data):
+    artist_list = []
+    for row in data['items']:
+        for key, value in row.items():
+            if key == "track":
+                for artist in value['artists']:
+                    artist_dict = {'artist_id':artist['id'], 'artist_name':artist['name'], 'external_url':artist['href']}
+                    artist_list.append(artist_dict)
+    return artist_list
+
+def songs(data):
+    song_list = []
+    for row in data['items']:
+        song_id = row['track']['id']
+        song_name = row['track']['name']
+        song_duration = row['track']['duration_ms']
+        song_url = row['track']['external_urls']['spotify']
+        song_popularity = row['track']['popularity']
+        song_added = row['added_at']
+        album_id = row['track']['album']['id']
+        artist_id = row['track']['album']['artists'][0]['id']
+        song_element = {'song_id':song_id,'song_name':song_name,'duration_ms':song_duration,'url':song_url,
+                        'popularity':song_popularity,'song_added':song_added,'album_id':album_id,'artist_id':artist_id
+                 }
+        song_list.append(song_element)
+
+    return song_list
+    
+
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    bucket = 'spotify-etl-project-arvid'
+    key = 'raw_data/to_processed/'
+
+    spotify_data = []
+    spotify_keys = []
+    for file in s3.list_objects(Bucket=bucket, Prefix=key)['Contents']:
+        file_key = file['Key']
+        if file_key.split('.')[-1] == 'json':
+            response = s3.get_object(Bucket=bucket, Key=file_key)
+            content = response['Body']
+            jsonObject = json.loads(content.read())
+            spotify_data.append(jsonObject)
+            spotify_keys.append(file_key)
+            
+    for data in spotify_data:
+        song_list = songs(data)
+        artist_list = artist(data)
+        album_list = album(data)
+
+        album_df = pd.DataFrame.from_dict(album_list)
+        album_df = album_df.drop_duplicates(subset=['album_id'])
+
+        artist_df = pd.DataFrame.from_dict(artist_list)
+        artist_df = artist_df.drop_duplicates(subset=['artist_id'])
+
+        song_df = pd.DataFrame.from_dict(song_list)
+
+        album_df['release_date'] = pd.to_datetime(album_df['release_date'])
+        song_df['song_added'] = pd.to_datetime(song_df['song_added'])
+
+        songs_key = "transformed_data/songs_data/songs_transformed_" + str(datetime.now()) + ".csv"
+        song_buffer = StringIO()
+        song_df.to_csv(song_buffer, index=False)
+        song_content = song_buffer.getvalue()
+        s3.put_object(Bucket=bucket, Key=songs_key, Body=song_content)
+
+        album_key = "transformed_data/album_data/album_transformed_" + str(datetime.now()) + ".csv"
+        album_buffer = StringIO()
+        album_df.to_csv(album_buffer, index=False)
+        album_content = album_buffer.getvalue()
+        s3.put_object(Bucket=bucket, Key=album_key, Body=album_content)
+
+        artist_key = "transformed_data/artist_data/artist_transformed_" + str(datetime.now()) + ".csv"
+        artist_buffer = StringIO()
+        artist_df.to_csv(artist_buffer, index=False)
+        artist_content = artist_buffer.getvalue()
+        s3.put_object(Bucket=bucket, Key=artist_key, Body=artist_content)
+
+    s3_resource = boto3.resource('s3')
+    for key in spotify_keys:
+        copy_source = {
+            'Bucket': bucket,
+            'Key': key
+        }
+        s3_resource.meta.client.copy(copy_source, bucket, 'raw_data/processed/' + key.split('/')[-1])
+        s3_resource.Object(bucket, key).delete()
+```
+
+
+
 
 
